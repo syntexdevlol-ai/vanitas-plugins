@@ -1,52 +1,54 @@
-(() => {
-  // Multi-client compatibility: some mods may not expose the same globals.
-  // Prefer the injected `vendetta` object, but fall back to `globalThis.vendetta` if needed.
-  const vd = typeof vendetta !== "undefined" ? vendetta : globalThis.vendetta;
+(function () {
+  // Keep this plugin very defensive: some clients differ in what globals / APIs exist.
+  // Vendetta-style loaders evaluate plugins as: vendetta => { return <plugin code> }
+  // So `vendetta` should exist here, but we still guard it.
 
-  const FALLBACK_REPO_BASE = "https://raw.githubusercontent.com/syntexdevlol-ai/vanitas-plugins/main/";
+  var vd = null;
+  try {
+    // If `vendetta` is not defined, this throws and we fall back.
+    vd = vendetta;
+  } catch (e) {
+    vd = null;
+  }
+
+  // Hard fallback base URL (used only if we can't derive from vd.plugin.id)
+  var FALLBACK_REPO_BASE = "https://raw.githubusercontent.com/syntexdevlol-ai/vanitas-plugins/main/";
 
   function toast(message) {
     try {
-      vd?.ui?.toasts?.showToast?.(String(message));
-    } catch {
-      // Last resort
-      try {
-        console.log(String(message));
-      } catch {
-        // ignore
+      if (vd && vd.ui && vd.ui.toasts && typeof vd.ui.toasts.showToast === "function") {
+        vd.ui.toasts.showToast(String(message));
+        return;
       }
+    } catch (e) {
+      // ignore
     }
-  }
 
-  // Resolve React and React Native without crashing plugin load if APIs differ.
-  function getReact() {
-    return (
-      vd?.metro?.common?.React ??
-      vd?.metro?.findByProps?.("createElement", "useEffect", "useState") ??
-      vd?.metro?.findByProps?.("createElement", "Component") ??
-      null
-    );
-  }
-
-  function getReactNative() {
-    return (
-      vd?.metro?.common?.ReactNative ??
-      vd?.metro?.findByProps?.("View", "Text", "ScrollView") ??
-      null
-    );
+    try {
+      console.log(String(message));
+    } catch (e2) {
+      // ignore
+    }
   }
 
   function normalizeBaseUrl(url) {
     if (typeof url !== "string" || !url.length) return "";
-    return url.endsWith("/") ? url : `${url}/`;
+    return url.charAt(url.length - 1) === "/" ? url : url + "/";
   }
 
   // If installed from `.../plugins/<id>/`, this returns the repo root `.../`.
   function getRepoBaseUrl() {
-    const pluginId = normalizeBaseUrl(vd?.plugin?.id);
+    var pluginId = "";
+    try {
+      pluginId = vd && vd.plugin && vd.plugin.id ? String(vd.plugin.id) : "";
+    } catch (e) {
+      pluginId = "";
+    }
+
+    pluginId = normalizeBaseUrl(pluginId);
     if (pluginId) {
-      const marker = "/plugins/";
-      const idx = pluginId.indexOf(marker);
+      var marker = "/plugins/";
+      var idx = pluginId.indexOf(marker);
       if (idx !== -1) return pluginId.slice(0, idx + 1);
     }
 
@@ -54,54 +56,98 @@
   }
 
   function getPluginBaseUrl(repoBaseUrl, pluginId) {
-    const base = normalizeBaseUrl(repoBaseUrl);
-    const id = String(pluginId ?? "").trim();
+    var base = normalizeBaseUrl(repoBaseUrl);
+    var id = String(pluginId || "").trim();
     if (!base || !id) return "";
-    return `${base}plugins/${id}/`;
+    return base + "plugins/" + id + "/";
   }
 
-  async function fetchJson(url) {
-    const fetchFn = vd?.utils?.safeFetch ?? fetch;
-    const res = await fetchFn(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Failed to fetch ${url} (HTTP ${res.status})`);
-    return await res.json();
+  function getReact() {
+    try {
+      if (vd && vd.metro && vd.metro.common && vd.metro.common.React) return vd.metro.common.React;
+      if (vd && vd.metro && typeof vd.metro.findByProps === "function") {
+        return vd.metro.findByProps("createElement", "useEffect", "useState");
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return null;
+  }
+
+  function getReactNative() {
+    try {
+      if (vd && vd.metro && vd.metro.common && vd.metro.common.ReactNative) return vd.metro.common.ReactNative;
+      if (vd && vd.metro && typeof vd.metro.findByProps === "function") {
+        return vd.metro.findByProps("View", "Text", "ScrollView");
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return null;
+  }
+
+  function fetchJson(url) {
+    var fetchFn = null;
+    try {
+      fetchFn = vd && vd.utils && typeof vd.utils.safeFetch === "function" ? vd.utils.safeFetch : fetch;
+    } catch (e) {
+      fetchFn = fetch;
+    }
+
+    return fetchFn(url, { cache: "no-store" }).then(function (res) {
+      if (!res || !res.ok) {
+        var status = res && typeof res.status === "number" ? res.status : "?";
+        throw new Error("Failed to fetch " + url + " (HTTP " + status + ")");
+      }
+      return res.json();
+    });
   }
 
   function Settings() {
-    const React = getReact();
-    const RN = getReactNative();
+    var React = getReact();
+    var RN = getReactNative();
 
-    if (!React || !RN) {
-      // Keep the plugin enabled even if the UI APIs differ in this client.
-      return null;
-    }
+    // Don’t crash if a client can’t render our UI.
+    if (!React || !RN) return null;
 
-    const h = React.createElement;
-    const { useEffect, useMemo, useState } = React;
-    const {
-      ActivityIndicator,
-      Pressable,
-      ScrollView,
-      Text,
-      TouchableOpacity,
-      View
-    } = RN;
+    var h = React.createElement;
+    var useEffect = React.useEffect;
+    var useMemo = React.useMemo;
+    var useState = React.useState;
 
-    const PressableLike = Pressable ?? TouchableOpacity;
+    var ActivityIndicator = RN.ActivityIndicator;
+    var Pressable = RN.Pressable;
+    var ScrollView = RN.ScrollView;
+    var Text = RN.Text;
+    var TouchableOpacity = RN.TouchableOpacity;
+    var View = RN.View;
 
-    function PrimaryButton({ label, onPress, disabled }) {
+    var PressableLike = Pressable || TouchableOpacity;
+
+    function PrimaryButton(props) {
+      var label = props.label;
+      var onPress = props.onPress;
+      var disabled = !!props.disabled;
+
+      if (!PressableLike) return null;
+
       return h(
         PressableLike,
         {
-          disabled,
-          onPress,
-          style: ({ pressed } = {}) => ({
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderRadius: 10,
-            backgroundColor: disabled ? "#999" : "#111",
-            opacity: pressed ? 0.7 : 1
-          })
+          disabled: disabled,
+          onPress: onPress,
+          style: function (state) {
+            var pressed = state && state.pressed;
+            return {
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              borderRadius: 10,
+              backgroundColor: disabled ? "#999" : "#111",
+              opacity: pressed ? 0.7 : 1,
+            };
+          },
         },
         h(
           Text,
@@ -109,15 +155,15 @@
             style: {
               color: "#fff",
               fontWeight: "700",
-              textAlign: "center"
-            }
+              textAlign: "center",
+            },
           },
           label
         )
       );
     }
 
-    function Card({ children }) {
+    function Card(props) {
       return h(
         View,
         {
@@ -125,44 +171,59 @@
             padding: 12,
             borderRadius: 14,
             backgroundColor: "rgba(0,0,0,0.06)",
-            marginBottom: 12
-          }
+            marginBottom: 12,
+          },
         },
-        children
+        props.children
       );
     }
 
-    const repoBaseUrl = useMemo(() => getRepoBaseUrl(), []);
-    const listUrl = useMemo(() => `${normalizeBaseUrl(repoBaseUrl)}plugins.json`, [repoBaseUrl]);
+    var repoBaseUrl = useMemo(function () {
+      return getRepoBaseUrl();
+    }, []);
 
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [plugins, setPlugins] = useState([]);
-    const [_tick, setTick] = useState(0); // forces re-render after install/uninstall
+    var listUrl = useMemo(function () {
+      return normalizeBaseUrl(repoBaseUrl) + "plugins.json";
+    }, [repoBaseUrl]);
 
-    async function reload() {
+    var _a = useState(true),
+      loading = _a[0],
+      setLoading = _a[1];
+    var _b = useState(null),
+      error = _b[0],
+      setError = _b[1];
+    var _c = useState([]),
+      plugins = _c[0],
+      setPlugins = _c[1];
+    var _d = useState(0),
+      tick = _d[0],
+      setTick = _d[1];
+
+    function reload() {
       setLoading(true);
       setError(null);
 
-      try {
-        const data = await fetchJson(listUrl);
-        const list = Array.isArray(data?.plugins) ? data.plugins : [];
-        setPlugins(list);
-      } catch (e) {
-        setError(e?.message ?? String(e));
-      } finally {
-        setLoading(false);
-      }
+      fetchJson(listUrl)
+        .then(function (data) {
+          var list = data && Array.isArray(data.plugins) ? data.plugins : [];
+          setPlugins(list);
+        })
+        .catch(function (e) {
+          setError((e && e.message) || String(e));
+        })
+        .finally(function () {
+          setLoading(false);
+        });
     }
 
-    useEffect(() => {
+    useEffect(function () {
       reload();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [listUrl]);
 
-    const installedMap = vd?.plugins?.plugins ?? {};
+    var installedMap = (vd && vd.plugins && vd.plugins.plugins) ? vd.plugins.plugins : {};
 
-    const header = h(
+    var header = h(
       View,
       { style: { marginBottom: 12 } },
       h(Text, { style: { fontSize: 20, fontWeight: "800" } }, "Vanitas Plugins"),
@@ -196,38 +257,58 @@
       );
     }
 
-    const cards = plugins.map((p) => {
-      const id = String(p?.id ?? "");
-      const name = String(p?.name ?? id);
-      const line1 = String(p?.line1 ?? p?.description ?? "");
-      const line2 = String(p?.line2 ?? p?.details ?? "");
+    var cards = plugins.map(function (p) {
+      var id = String((p && p.id) || "");
+      var name = String((p && p.name) || id);
+      var line1 = String((p && (p.line1 || p.description)) || "");
+      var line2 = String((p && (p.line2 || p.details)) || "");
 
-      const baseUrl = getPluginBaseUrl(repoBaseUrl, id);
-      const isInstalled = Boolean(baseUrl && installedMap[baseUrl]);
-      const isSelf = normalizeBaseUrl(vd?.plugin?.id) === baseUrl;
+      var baseUrl = getPluginBaseUrl(repoBaseUrl, id);
+      var isInstalled = !!(baseUrl && installedMap[baseUrl]);
+      var selfId = "";
+      try {
+        selfId = vd && vd.plugin && vd.plugin.id ? normalizeBaseUrl(String(vd.plugin.id)) : "";
+      } catch (e) {
+        selfId = "";
+      }
+      var isSelf = selfId && baseUrl && selfId === baseUrl;
 
-      const canInstall = typeof vd?.plugins?.installPlugin === "function";
-      const canRemove = typeof vd?.plugins?.removePlugin === "function";
+      var canInstall = !!(vd && vd.plugins && typeof vd.plugins.installPlugin === "function");
+      var canRemove = !!(vd && vd.plugins && typeof vd.plugins.removePlugin === "function");
 
-      const label = isInstalled ? (isSelf ? "Installed" : "Uninstall") : "Install";
-      const disabled = !baseUrl || isSelf ? true : (isInstalled ? !canRemove : !canInstall);
+      var label = isInstalled ? (isSelf ? "Installed" : "Uninstall") : "Install";
+      var disabled = !baseUrl || isSelf ? true : (isInstalled ? !canRemove : !canInstall);
 
-      const onPress = async () => {
-        try {
-          if (isInstalled) {
-            if (!canRemove) throw new Error("removePlugin API is not available");
-            await vd.plugins.removePlugin(baseUrl);
-            toast(`Uninstalled: ${name}`);
-          } else {
-            if (!canInstall) throw new Error("installPlugin API is not available");
-            await vd.plugins.installPlugin(baseUrl, true);
-            toast(`Installed: ${name}`);
+      function onPress() {
+        if (!vd || !vd.plugins) return;
+
+        var action;
+        if (isInstalled) {
+          if (!canRemove) {
+            toast("removePlugin API is not available");
+            return;
           }
-          setTick((t) => t + 1);
-        } catch (e) {
-          toast(e?.message ?? String(e));
+          action = vd.plugins.removePlugin(baseUrl).then(function () {
+            toast("Uninstalled: " + name);
+          });
+        } else {
+          if (!canInstall) {
+            toast("installPlugin API is not available");
+            return;
+          }
+          action = vd.plugins.installPlugin(baseUrl, true).then(function () {
+            toast("Installed: " + name);
+          });
         }
-      };
+
+        Promise.resolve(action)
+          .then(function () {
+            setTick(function (t) { return t + 1; });
+          })
+          .catch(function (e) {
+            toast((e && e.message) || String(e));
+          });
+      }
 
       return h(
         Card,
@@ -236,36 +317,31 @@
         line1 ? h(Text, { style: { marginTop: 6, opacity: 0.85 } }, line1) : null,
         line2 ? h(Text, { style: { marginTop: 2, opacity: 0.85 } }, line2) : null,
         h(View, { style: { height: 10 } }),
-        h(PrimaryButton, { label, onPress, disabled }),
+        h(PrimaryButton, { label: label, onPress: onPress, disabled: disabled }),
         h(View, { style: { height: 8 } }),
         h(Text, { selectable: true, style: { opacity: 0.6, fontSize: 12 } }, baseUrl)
       );
     });
 
-    // `_tick` is used only to force a re-render after install/uninstall.
-    void _tick;
+    // force re-render on install/uninstall
+    void tick;
 
-    return h(ScrollView, { style: { padding: 12 } }, header, ...cards);
+    return h.apply(null, [ScrollView, { style: { padding: 12 } }, header].concat(cards));
   }
 
-  if (!vd) {
-    return {
-      onLoad() {
-        console.log("Vanitas Plugins loaded (vendetta API not found)");
-      },
-      onUnload() {},
-      settings: () => null
-    };
-  }
-
+  // Export plugin object.
   return {
-    onLoad() {
-      console.log("Vanitas Plugins loaded");
+    onLoad: function () {
+      try {
+        console.log("Vanitas Plugins loaded");
+      } catch (e) {
+        // ignore
+      }
       toast("Vanitas Plugins loaded");
     },
-    onUnload() {
+    onUnload: function () {
       // no-op
     },
-    settings: Settings
+    settings: Settings,
   };
-})()
+})();
