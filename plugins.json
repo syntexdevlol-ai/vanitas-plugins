@@ -1,0 +1,17 @@
+{
+  "name": "Vanitas Plugins",
+  "plugins": [
+    {
+      "id": "vanitas-plugins",
+      "name": "Vanitas Plugins",
+      "line1": "In-app browser for the Vanitas plugin repo.",
+      "line2": "Install and manage Vanitas plugins from one place."
+    },
+    {
+      "id": "test-plugin",
+      "name": "Test Plugin",
+      "line1": "Registers /test and confirms the plugin is working.",
+      "line2": "Run /test to get: ✅ Test plugin works!"
+    }
+  ]
+}

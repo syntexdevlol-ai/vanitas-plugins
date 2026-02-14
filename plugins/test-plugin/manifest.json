@@ -1,0 +1,15 @@
+{
+  "name": "Test Plugin",
+  "description": "Registers /test and confirms the plugin is working.",
+  "authors": [
+    {
+      "name": "syntexdevlol-ai",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "hash": "9af66de43435946bb4fa56c5507165cfd3abe13c4446897561784be72586fe88",
+  "vendetta": {
+    "icon": "ChatAlertIcon"
+  }
+}

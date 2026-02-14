@@ -1,0 +1,15 @@
+{
+  "name": "Vanitas Plugins",
+  "description": "A small plugin browser for installing Vanitas plugins.",
+  "authors": [
+    {
+      "name": "syntexdevlol-ai",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "hash": "08fe5874261f510abac5c4904224f7b5d73679d9bd275af633d73ca66c85a53e",
+  "vendetta": {
+    "icon": "DownloadIcon"
+  }
+}
