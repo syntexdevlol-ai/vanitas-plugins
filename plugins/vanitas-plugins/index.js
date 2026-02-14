@@ -109,6 +109,11 @@
   // This uses Kettu's internal `@ui/settings` registry if available, otherwise it silently does nothing.
   var SETTINGS_ROW_KEY = "VANITAS_PLUGINS_BROWSER";
   var uninjectSettingsEntry = null;
+  var injectTimer = null;
+  var injectAttempts = 0;
+  var INJECT_INTERVAL_MS = 1500;
+  var MAX_INJECT_ATTEMPTS = 40;
+  var hasShownInjectHint = false;
 
   function tryInjectSettingsEntry() {
     if (!vd || !vd.metro || typeof vd.metro.findByProps !== "function") return null;
@@ -126,12 +131,10 @@
     var sections = settingsUi.registeredSections;
     if (!sections || typeof sections !== "object") return null;
 
-    // Prefer the existing Kettu/Keetu section. Fall back to an empty compat section if needed.
+    // Prefer the existing Keetu/Kettu section.
     var sectionName = null;
     if (sections.Keetu && Array.isArray(sections.Keetu)) sectionName = "Keetu";
     else if (sections.Kettu && Array.isArray(sections.Kettu)) sectionName = "Kettu";
-    else if (sections.Bunny && Array.isArray(sections.Bunny)) sectionName = "Bunny";
-    else if (sections.Vendetta && Array.isArray(sections.Vendetta)) sectionName = "Vendetta";
 
     var icon = undefined;
     try {
@@ -167,6 +170,18 @@
     // If we found a target section, append our row without clobbering existing items.
     if (sectionName) {
       var target = sections[sectionName];
+      if (!Array.isArray(target)) return null;
+
+      // Some clients may freeze arrays; copy so we can safely mutate.
+      try {
+        if (Object.isFrozen && Object.isFrozen(target)) {
+          target = target.slice();
+          sections[sectionName] = target;
+        }
+      } catch (e0) {
+        // ignore
+      }
+
       for (var j = 0; j < target.length; j++) {
         if (target[j] && target[j].key === SETTINGS_ROW_KEY) {
           return function () {
@@ -175,22 +190,76 @@
         }
       }
 
-      target.push(row);
+      // Insert before the developer row if present, otherwise append.
+      var insertAt = target.length;
+      for (var k = 0; k < target.length; k++) {
+        if (target[k] && target[k].key === "BUNNY_DEVELOPER") {
+          insertAt = k;
+          break;
+        }
+      }
+
+      target.splice(insertAt, 0, row);
       return function () {
         removeRowFrom(sectionName);
       };
     }
 
-    // Fallback: create a new section if the registry exists but no known section was found.
-    if (typeof settingsUi.registerSection === "function") {
-      try {
-        return settingsUi.registerSection({ name: "Vanitas", items: [row] });
-      } catch (e3) {
-        // ignore
+    return null;
+  }
+
+  function clearInjectTimer() {
+    try {
+      if (injectTimer) clearInterval(injectTimer);
+    } catch (e) {
+      // ignore
+    }
+    injectTimer = null;
+  }
+
+  function attemptSettingsInjection() {
+    injectAttempts += 1;
+
+    var fn = null;
+    try {
+      fn = tryInjectSettingsEntry();
+    } catch (e) {
+      fn = null;
+    }
+
+    if (typeof fn === "function") {
+      uninjectSettingsEntry = fn;
+      clearInjectTimer();
+      toast("Vanitas Plugins added to Settings");
+      return true;
+    }
+
+    if (injectAttempts >= MAX_INJECT_ATTEMPTS) {
+      clearInjectTimer();
+      if (!hasShownInjectHint) {
+        hasShownInjectHint = true;
+        toast("Vanitas Plugins: open Settings once, then try again");
       }
     }
 
-    return null;
+    return false;
+  }
+
+  function startSettingsInjection() {
+    injectAttempts = 0;
+    hasShownInjectHint = false;
+
+    if (attemptSettingsInjection()) return;
+
+    // Retry until the settings UI module loads (it may not be in memory yet).
+    clearInjectTimer();
+    try {
+      injectTimer = setInterval(function () {
+        attemptSettingsInjection();
+      }, INJECT_INTERVAL_MS);
+    } catch (e) {
+      injectTimer = null;
+    }
   }
 
   function Settings() {
@@ -428,14 +497,15 @@
       toast("Vanitas Plugins loaded");
 
       try {
-        // Inject settings entry on load.
-        uninjectSettingsEntry = tryInjectSettingsEntry();
+        // Inject settings entry on load (with retries).
+        startSettingsInjection();
       } catch (e2) {
         uninjectSettingsEntry = null;
       }
     },
     onUnload: function () {
       try {
+        clearInjectTimer();
         if (typeof uninjectSettingsEntry === "function") uninjectSettingsEntry();
       } catch (e) {
         // ignore
