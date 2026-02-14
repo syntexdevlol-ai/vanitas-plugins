@@ -105,6 +105,94 @@
     });
   }
 
+  // Inject a "Vanitas Plugins" entry into Kettu/Keetu settings so you don't need the plugin wrench.
+  // This uses Kettu's internal `@ui/settings` registry if available, otherwise it silently does nothing.
+  var SETTINGS_ROW_KEY = "VANITAS_PLUGINS_BROWSER";
+  var uninjectSettingsEntry = null;
+
+  function tryInjectSettingsEntry() {
+    if (!vd || !vd.metro || typeof vd.metro.findByProps !== "function") return null;
+
+    var settingsUi = null;
+    try {
+      // Kettu exposes { registeredSections, registerSection } via @ui/settings.
+      settingsUi = vd.metro.findByProps("registeredSections", "registerSection");
+    } catch (e) {
+      settingsUi = null;
+    }
+
+    if (!settingsUi || !settingsUi.registeredSections) return null;
+
+    var sections = settingsUi.registeredSections;
+    if (!sections || typeof sections !== "object") return null;
+
+    // Prefer the existing Kettu/Keetu section. Fall back to an empty compat section if needed.
+    var sectionName = null;
+    if (sections.Keetu && Array.isArray(sections.Keetu)) sectionName = "Keetu";
+    else if (sections.Kettu && Array.isArray(sections.Kettu)) sectionName = "Kettu";
+    else if (sections.Bunny && Array.isArray(sections.Bunny)) sectionName = "Bunny";
+    else if (sections.Vendetta && Array.isArray(sections.Vendetta)) sectionName = "Vendetta";
+
+    var icon = undefined;
+    try {
+      if (vd.ui && vd.ui.assets && typeof vd.ui.assets.getAssetIDByName === "function") {
+        icon = vd.ui.assets.getAssetIDByName("DownloadIcon") || vd.ui.assets.getAssetIDByName("AppsIcon");
+      }
+    } catch (e2) {
+      icon = undefined;
+    }
+
+    var row = {
+      key: SETTINGS_ROW_KEY,
+      title: function () {
+        return "Vanitas Plugins";
+      },
+      icon: icon,
+      // Kettu expects `render` to return a Promise that resolves to `{ default: Component }`.
+      render: function () {
+        return new Promise(function (resolve) {
+          resolve({ default: Settings });
+        });
+      },
+    };
+
+    function removeRowFrom(name) {
+      var arr = sections[name];
+      if (!Array.isArray(arr)) return;
+      for (var i = arr.length - 1; i >= 0; i--) {
+        if (arr[i] && arr[i].key === SETTINGS_ROW_KEY) arr.splice(i, 1);
+      }
+    }
+
+    // If we found a target section, append our row without clobbering existing items.
+    if (sectionName) {
+      var target = sections[sectionName];
+      for (var j = 0; j < target.length; j++) {
+        if (target[j] && target[j].key === SETTINGS_ROW_KEY) {
+          return function () {
+            // already injected
+          };
+        }
+      }
+
+      target.push(row);
+      return function () {
+        removeRowFrom(sectionName);
+      };
+    }
+
+    // Fallback: create a new section if the registry exists but no known section was found.
+    if (typeof settingsUi.registerSection === "function") {
+      try {
+        return settingsUi.registerSection({ name: "Vanitas", items: [row] });
+      } catch (e3) {
+        // ignore
+      }
+    }
+
+    return null;
+  }
+
   function Settings() {
     var React = getReact();
     var RN = getReactNative();
@@ -338,9 +426,21 @@
         // ignore
       }
       toast("Vanitas Plugins loaded");
+
+      try {
+        // Inject settings entry on load.
+        uninjectSettingsEntry = tryInjectSettingsEntry();
+      } catch (e2) {
+        uninjectSettingsEntry = null;
+      }
     },
     onUnload: function () {
-      // no-op
+      try {
+        if (typeof uninjectSettingsEntry === "function") uninjectSettingsEntry();
+      } catch (e) {
+        // ignore
+      }
+      uninjectSettingsEntry = null;
     },
     settings: Settings,
   };
