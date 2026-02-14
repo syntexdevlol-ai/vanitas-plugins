@@ -1,0 +1,15 @@
+{
+  "name": "Bulk Guild Leaver",
+  "description": "Leave multiple servers (guilds) in one go with confirmation + optional delay.",
+  "authors": [
+    {
+      "name": "syntexdevlol-ai",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "hash": "4f299be8b8e169a16ea0055a4c141621235b40c5bb2ae23a200385f050fdf15b",
+  "vendetta": {
+    "icon": "LogOutIcon"
+  }
+}

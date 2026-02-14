@@ -12,6 +12,12 @@
       "name": "Test Plugin",
       "line1": "Registers /test and confirms the plugin is working.",
       "line2": "Run /test to get: ✅ Test plugin works!"
+    },
+    {
+      "id": "bulk-guild-leaver",
+      "name": "Bulk Guild Leaver",
+      "line1": "Leave multiple servers with confirmation + optional delay.",
+      "line2": "Select, confirm, and watch progress (with Stop)."
     }
   ]
 }

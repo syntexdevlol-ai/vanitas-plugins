@@ -22,3 +22,7 @@ Install and manage Vanitas plugins from one place.
 ### Test Plugin
 Registers /test and confirms the plugin is working.
 Run /test to get: ✅ Test plugin works!
+
+### Bulk Guild Leaver
+Leave multiple servers with confirmation + optional delay.
+Select, confirm, and watch progress (with Stop).
