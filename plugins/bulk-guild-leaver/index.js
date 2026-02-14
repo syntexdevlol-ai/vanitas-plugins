@@ -2,31 +2,95 @@
   // Bulk Guild Leaver
   // Select multiple servers (guilds) and leave them in one action.
 
-  const vd = vendetta;
-  const React = vd.metro.common.React;
-  const RN = vd.metro.common.ReactNative;
+  let vd;
+  try {
+    vd = vendetta;
+  } catch (e) {
+    vd = null;
+  }
 
-  const GuildStore = vd.metro.findByStoreName("GuildStore");
-  const GuildActions = vd.metro.findByProps("leaveGuild");
-
-  const Pressable = RN.Pressable || RN.TouchableOpacity;
+  const log = (msg) => {
+    try {
+      console.log(String(msg));
+    } catch (e) {
+      // ignore
+    }
+  };
 
   const toast = (msg) => {
     try {
-      vd.ui.toasts.showToast(String(msg));
+      if (vd && vd.ui && vd.ui.toasts && typeof vd.ui.toasts.showToast === "function") {
+        vd.ui.toasts.showToast(String(msg));
+        return;
+      }
     } catch (e) {
-      console.log(String(msg));
+      // ignore
     }
+    log(msg);
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // Minimal "compat" helpers so this runs on Bunny / Revenge / Vendetta / Keetu builds.
+  const findByPropsSafe = (...props) => {
+    try {
+      if (vd && vd.metro && typeof vd.metro.findByProps === "function") return vd.metro.findByProps(...props);
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  };
+
+  const findByStoreNameSafe = (name) => {
+    try {
+      if (vd && vd.metro && typeof vd.metro.findByStoreName === "function") return vd.metro.findByStoreName(name);
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  };
+
+  const getReact = () => {
+    try {
+      if (vd && vd.metro && vd.metro.common && vd.metro.common.React) return vd.metro.common.React;
+    } catch (e) {
+      // ignore
+    }
+    return findByPropsSafe("createElement", "useState", "useEffect", "useMemo", "useRef", "useCallback");
+  };
+
+  const getRN = () => {
+    try {
+      if (vd && vd.metro && vd.metro.common && vd.metro.common.ReactNative) return vd.metro.common.ReactNative;
+    } catch (e) {
+      // ignore
+    }
+    return findByPropsSafe("View", "Text", "ScrollView", "TextInput", "ActivityIndicator");
+  };
+
+  const getGuildStore = () => {
+    const store = findByStoreNameSafe("GuildStore");
+    if (store && typeof store.getGuilds === "function") return store;
+
+    const maybe = findByPropsSafe("getGuilds");
+    if (maybe && typeof maybe.getGuilds === "function") return maybe;
+
+    return null;
+  };
+
+  const getGuildActions = () => {
+    const actions = findByPropsSafe("leaveGuild");
+    if (actions && typeof actions.leaveGuild === "function") return actions;
+    return null;
+  };
+
   const loadGuilds = () => {
-    if (!GuildStore || typeof GuildStore.getGuilds !== "function") return [];
+    const store = getGuildStore();
+    if (!store || typeof store.getGuilds !== "function") return [];
 
     let map;
     try {
-      map = GuildStore.getGuilds();
+      map = store.getGuilds();
     } catch (e) {
       map = null;
     }
@@ -45,7 +109,15 @@
   };
 
   const Settings = () => {
+    const React = getReact();
+    const RN = getRN();
+    if (!React || !RN) {
+      toast("Bulk Guild Leaver: could not find React / ReactNative in this client.");
+      return null;
+    }
+
     const h = React.createElement;
+    const Pressable = RN.Pressable || RN.TouchableOpacity;
 
     const [guilds, setGuilds] = React.useState([]);
     const [query, setQuery] = React.useState("");
@@ -121,7 +193,8 @@
     };
 
     const startLeaving = async () => {
-      if (!GuildActions || typeof GuildActions.leaveGuild !== "function") {
+      const actions = getGuildActions();
+      if (!actions || typeof actions.leaveGuild !== "function") {
         toast("leaveGuild() not found in this client.");
         return;
       }
@@ -149,7 +222,7 @@
         setProgress({ total: selectedIds.length, done: i, failed, current: idToName[id] || id });
 
         try {
-          await Promise.resolve(GuildActions.leaveGuild(id));
+          await Promise.resolve(actions.leaveGuild(id));
         } catch (e) {
           failed++;
         }
@@ -301,12 +374,11 @@
     );
   };
 
-  return {
-    onLoad() {
-      console.log("Bulk Guild Leaver loaded");
+    return {
+      onLoad() {
+      log("Bulk Guild Leaver loaded");
     },
     onUnload() {},
     settings: Settings,
   };
 })();
-
