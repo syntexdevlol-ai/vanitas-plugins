@@ -1,105 +1,144 @@
 (() => {
-  const React = vendetta.metro.common.React;
-  const RN = vendetta.metro.common.ReactNative;
-  const h = React.createElement;
+  // Multi-client compatibility: some mods may not expose the same globals.
+  // Prefer the injected `vendetta` object, but fall back to `globalThis.vendetta` if needed.
+  const vd = typeof vendetta !== "undefined" ? vendetta : globalThis.vendetta;
 
-  const { useEffect, useMemo, useState } = React;
-  const {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    Text,
-    View
-  } = RN;
+  const FALLBACK_REPO_BASE = "https://raw.githubusercontent.com/syntexdevlol-ai/vanitas-plugins/main/";
 
   function toast(message) {
     try {
-      vendetta.ui.toasts.showToast(String(message));
+      vd?.ui?.toasts?.showToast?.(String(message));
     } catch {
-      console.log(String(message));
+      // Last resort
+      try {
+        console.log(String(message));
+      } catch {
+        // ignore
+      }
     }
   }
 
-  function getRepoBaseUrl() {
-    // If installed from a raw GitHub folder URL, this resolves to the repo root.
-    // Example: .../main/plugins/vanitas-plugins/ -> .../main/
-    try {
-      return new URL("../../", vendetta.plugin.id).toString();
-    } catch {
-      // Fallback for clients without vendetta.plugin.id
-      return "https://raw.githubusercontent.com/syntexdevlol-ai/vanitas-plugins/main/";
-    }
+  // Resolve React and React Native without crashing plugin load if APIs differ.
+  function getReact() {
+    return (
+      vd?.metro?.common?.React ??
+      vd?.metro?.findByProps?.("createElement", "useEffect", "useState") ??
+      vd?.metro?.findByProps?.("createElement", "Component") ??
+      null
+    );
   }
 
-  function getPluginBaseUrl(repoBaseUrl, pluginId) {
-    const url = new URL(`plugins/${pluginId}/`, repoBaseUrl).toString();
+  function getReactNative() {
+    return (
+      vd?.metro?.common?.ReactNative ??
+      vd?.metro?.findByProps?.("View", "Text", "ScrollView") ??
+      null
+    );
+  }
+
+  function normalizeBaseUrl(url) {
+    if (typeof url !== "string" || !url.length) return "";
     return url.endsWith("/") ? url : `${url}/`;
   }
 
+  // If installed from `.../plugins/<id>/`, this returns the repo root `.../`.
+  function getRepoBaseUrl() {
+    const pluginId = normalizeBaseUrl(vd?.plugin?.id);
+    if (pluginId) {
+      const marker = "/plugins/";
+      const idx = pluginId.indexOf(marker);
+      if (idx !== -1) return pluginId.slice(0, idx + 1);
+    }
+
+    return FALLBACK_REPO_BASE;
+  }
+
+  function getPluginBaseUrl(repoBaseUrl, pluginId) {
+    const base = normalizeBaseUrl(repoBaseUrl);
+    const id = String(pluginId ?? "").trim();
+    if (!base || !id) return "";
+    return `${base}plugins/${id}/`;
+  }
+
   async function fetchJson(url) {
-    const fetchFn = vendetta.utils?.safeFetch ?? fetch;
+    const fetchFn = vd?.utils?.safeFetch ?? fetch;
     const res = await fetchFn(url, { cache: "no-store" });
     if (!res.ok) throw new Error(`Failed to fetch ${url} (HTTP ${res.status})`);
     return await res.json();
   }
 
-  function PrimaryButton({ label, onPress, disabled }) {
-    return h(
+  function Settings() {
+    const React = getReact();
+    const RN = getReactNative();
+
+    if (!React || !RN) {
+      // Keep the plugin enabled even if the UI APIs differ in this client.
+      return null;
+    }
+
+    const h = React.createElement;
+    const { useEffect, useMemo, useState } = React;
+    const {
+      ActivityIndicator,
       Pressable,
-      {
-        disabled,
-        onPress,
-        style: ({ pressed }) => ({
-          paddingVertical: 10,
-          paddingHorizontal: 12,
-          borderRadius: 10,
-          backgroundColor: disabled ? "#999" : "#111",
-          opacity: pressed ? 0.7 : 1
-        })
-      },
-      h(
-        Text,
+      ScrollView,
+      Text,
+      TouchableOpacity,
+      View
+    } = RN;
+
+    const PressableLike = Pressable ?? TouchableOpacity;
+
+    function PrimaryButton({ label, onPress, disabled }) {
+      return h(
+        PressableLike,
+        {
+          disabled,
+          onPress,
+          style: ({ pressed } = {}) => ({
+            paddingVertical: 10,
+            paddingHorizontal: 12,
+            borderRadius: 10,
+            backgroundColor: disabled ? "#999" : "#111",
+            opacity: pressed ? 0.7 : 1
+          })
+        },
+        h(
+          Text,
+          {
+            style: {
+              color: "#fff",
+              fontWeight: "700",
+              textAlign: "center"
+            }
+          },
+          label
+        )
+      );
+    }
+
+    function Card({ children }) {
+      return h(
+        View,
         {
           style: {
-            color: "#fff",
-            fontWeight: "700",
-            textAlign: "center"
+            padding: 12,
+            borderRadius: 14,
+            backgroundColor: "rgba(0,0,0,0.06)",
+            marginBottom: 12
           }
         },
-        label
-      )
-    );
-  }
-
-  function Card({ children }) {
-    return h(
-      View,
-      {
-        style: {
-          padding: 12,
-          borderRadius: 14,
-          backgroundColor: "rgba(0,0,0,0.06)",
-          marginBottom: 12
-        }
-      },
-      children
-    );
-  }
-
-  function Settings() {
-    // Re-render when plugin install state changes.
-    try {
-      vendetta.storage.useProxy(vendetta.plugins.plugins);
-    } catch {
-      // ignore
+        children
+      );
     }
 
     const repoBaseUrl = useMemo(() => getRepoBaseUrl(), []);
-    const listUrl = useMemo(() => new URL("plugins.json", repoBaseUrl).toString(), [repoBaseUrl]);
+    const listUrl = useMemo(() => `${normalizeBaseUrl(repoBaseUrl)}plugins.json`, [repoBaseUrl]);
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [plugins, setPlugins] = useState([]);
+    const [_tick, setTick] = useState(0); // forces re-render after install/uninstall
 
     async function reload() {
       setLoading(true);
@@ -121,9 +160,11 @@
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [listUrl]);
 
-    const installedMap = vendetta.plugins?.plugins ?? {};
+    const installedMap = vd?.plugins?.plugins ?? {};
 
-    const header = h(View, { style: { marginBottom: 12 } },
+    const header = h(
+      View,
+      { style: { marginBottom: 12 } },
       h(Text, { style: { fontSize: 20, fontWeight: "800" } }, "Vanitas Plugins"),
       h(Text, { style: { marginTop: 4, opacity: 0.8 } }, "Install and manage plugins from your Vanitas repo."),
       h(View, { style: { height: 10 } }),
@@ -131,16 +172,22 @@
     );
 
     if (loading) {
-      return h(ScrollView, { style: { padding: 12 } },
+      return h(
+        ScrollView,
+        { style: { padding: 12 } },
         header,
         h(View, { style: { paddingVertical: 24 } }, h(ActivityIndicator, null))
       );
     }
 
     if (error) {
-      return h(ScrollView, { style: { padding: 12 } },
+      return h(
+        ScrollView,
+        { style: { padding: 12 } },
         header,
-        h(Card, null,
+        h(
+          Card,
+          null,
           h(Text, { style: { fontWeight: "700", marginBottom: 6 } }, "Failed to load plugin list"),
           h(Text, { selectable: true }, String(error)),
           h(View, { style: { height: 10 } }),
@@ -156,32 +203,35 @@
       const line2 = String(p?.line2 ?? p?.details ?? "");
 
       const baseUrl = getPluginBaseUrl(repoBaseUrl, id);
-      const isInstalled = Boolean(installedMap[baseUrl]);
+      const isInstalled = Boolean(baseUrl && installedMap[baseUrl]);
+      const isSelf = normalizeBaseUrl(vd?.plugin?.id) === baseUrl;
 
-      const isSelf = String(vendetta?.plugin?.id ?? "") === baseUrl;
-      const canInstall = typeof vendetta?.plugins?.installPlugin === "function";
-      const canRemove = typeof vendetta?.plugins?.removePlugin === "function";
+      const canInstall = typeof vd?.plugins?.installPlugin === "function";
+      const canRemove = typeof vd?.plugins?.removePlugin === "function";
 
       const label = isInstalled ? (isSelf ? "Installed" : "Uninstall") : "Install";
-      const disabled = isSelf ? true : (isInstalled ? !canRemove : !canInstall);
+      const disabled = !baseUrl || isSelf ? true : (isInstalled ? !canRemove : !canInstall);
 
       const onPress = async () => {
         try {
           if (isInstalled) {
             if (!canRemove) throw new Error("removePlugin API is not available");
-            await vendetta.plugins.removePlugin(baseUrl);
+            await vd.plugins.removePlugin(baseUrl);
             toast(`Uninstalled: ${name}`);
           } else {
             if (!canInstall) throw new Error("installPlugin API is not available");
-            await vendetta.plugins.installPlugin(baseUrl, true);
+            await vd.plugins.installPlugin(baseUrl, true);
             toast(`Installed: ${name}`);
           }
+          setTick((t) => t + 1);
         } catch (e) {
           toast(e?.message ?? String(e));
         }
       };
 
-      return h(Card, { key: id },
+      return h(
+        Card,
+        { key: id },
         h(Text, { style: { fontSize: 16, fontWeight: "800" } }, name),
         line1 ? h(Text, { style: { marginTop: 6, opacity: 0.85 } }, line1) : null,
         line2 ? h(Text, { style: { marginTop: 2, opacity: 0.85 } }, line2) : null,
@@ -192,12 +242,26 @@
       );
     });
 
+    // `_tick` is used only to force a re-render after install/uninstall.
+    void _tick;
+
     return h(ScrollView, { style: { padding: 12 } }, header, ...cards);
+  }
+
+  if (!vd) {
+    return {
+      onLoad() {
+        console.log("Vanitas Plugins loaded (vendetta API not found)");
+      },
+      onUnload() {},
+      settings: () => null
+    };
   }
 
   return {
     onLoad() {
       console.log("Vanitas Plugins loaded");
+      toast("Vanitas Plugins loaded");
     },
     onUnload() {
       // no-op
