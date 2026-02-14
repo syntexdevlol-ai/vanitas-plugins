@@ -65,7 +65,7 @@
     } catch (e) {
       // ignore
     }
-    return findByPropsSafe("View", "Text", "ScrollView", "TextInput", "ActivityIndicator");
+    return findByPropsSafe("View", "Text", "ScrollView", "TextInput");
   };
 
   const getGuildStore = () => {
